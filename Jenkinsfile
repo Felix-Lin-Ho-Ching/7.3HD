@@ -45,17 +45,15 @@ pipeline {
     stage('Test') {
       steps {
         sh '''
-        # clean + a place for the report in the workspace
         rm -rf reports && mkdir -p reports
-
-        # run tests **inside the built image**, making sure dev deps are installed
+        IMAGE="${DOCKERHUB_USER}/sit753-7-3hd-pipeline:${GIT_SHA}"
         docker run --rm \
-        -e NODE_ENV=development \
-        -e NPM_CONFIG_PRODUCTION=false \
-        -v "$PWD/reports:/app/reports" \
-        ${REGISTRY}/${DOCKERHUB_USER}/sit753-7-3hd-pipeline:${GIT_SHA} \
-        sh -lc "npm ci && npx jest --runInBand --ci --reporters=default --reporters=jest-junit"
-    '''
+          -e NODE_ENV=development \
+          -e NPM_CONFIG_PRODUCTION=false \
+          -v "$PWD/reports:/app/reports" \
+          "$IMAGE" \
+          sh -lc "npm ci && npx jest --runInBand --ci --reporters=default --reporters=jest-junit"
+        '''
       }
       post {
         always {
