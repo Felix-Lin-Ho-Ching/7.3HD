@@ -24,43 +24,49 @@ pipeline {
       steps {
         checkout scm
         script {
-          sh 'git rev-parse --short HEAD > .git-sha'
-          env.GIT_SHA = readFile('.git-sha').trim()
-          env.IMAGE = "${REGISTRY}/${APP}:${GIT_SHA}"
-        }
-      }
+          env.GIT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
     }
+  }
+}
 
-    stage('Build') {
-      steps {
-        sh '''#!/bin/sh
-          docker login -u ${DOCKERHUB_USER} -p ${DOCKERHUB_PASS}
-          docker build -t ${IMAGE} -t ${REGISTRY}/${APP}:latest .
-          docker push ${IMAGE}
-          docker push ${REGISTRY}/${APP}:latest
+  stage('Build') {
+    steps {
+      withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKERHUB_USER', passwordVariable: 'DOCKERHUB_PASS')]) {
+        sh '''
+          echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+          IMAGE_REPO="${DOCKERHUB_USER}/sit753-7-3hd-pipeline"
+          docker build -t "${IMAGE_REPO}:${GIT_SHA}" -t "${IMAGE_REPO}:latest" .
+          docker push "${IMAGE_REPO}:${GIT_SHA}"
+          docker push "${IMAGE_REPO}:latest"
         '''
       }
     }
+  } 
 
-    stage('Test') {
-      steps {
+  stage('Test') {
+    steps {
+      withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKERHUB_USER', passwordVariable: 'DOCKERHUB_PASS')]) {
         sh '''
-        rm -rf reports && mkdir -p reports
-        IMAGE="${DOCKERHUB_USER}/sit753-7-3hd-pipeline:${GIT_SHA}"
-        docker run --rm \
+          IMAGE_REPO="${DOCKERHUB_USER}/sit753-7-3hd-pipeline"
+          rm -rf reports && mkdir -p reports
+
+          # Run tests INSIDE the app image.
+          # NPM_CONFIG_PRODUCTION=false ensures devDependencies (jest) are installed for testing.
+          docker run --rm \
           -e NODE_ENV=development \
           -e NPM_CONFIG_PRODUCTION=false \
           -v "$PWD/reports:/app/reports" \
-          "$IMAGE" \
+          "${IMAGE_REPO}:${GIT_SHA}" \
           sh -lc "npm ci && npx jest --runInBand --ci --reporters=default --reporters=jest-junit"
         '''
       }
-      post {
-        always {
-          junit 'reports/junit.xml'
-        }
-      }
-    } 
+    }
+    post {
+      always {
+        junit 'reports/junit.xml'
+    }
+  }
+} 
 
     stage('Code Quality') {
       steps {
