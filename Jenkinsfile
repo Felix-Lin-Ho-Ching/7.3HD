@@ -44,17 +44,25 @@ pipeline {
 
     stage('Test') {
       steps {
-        sh '''#!/bin/sh
-          docker run --rm ${IMAGE} sh -lc 'npm ci && npm test'
-        '''
+        sh '''
+        # clean + a place for the report in the workspace
+        rm -rf reports && mkdir -p reports
+
+        # run tests **inside the built image**, making sure dev deps are installed
+        docker run --rm \
+        -e NODE_ENV=development \
+        -e NPM_CONFIG_PRODUCTION=false \
+        -v "$PWD/reports:/app/reports" \
+        ${REGISTRY}/${DOCKERHUB_USER}/sit753-7-3hd-pipeline:${GIT_SHA} \
+        sh -lc "npm ci && npx jest --runInBand --ci --reporters=default --reporters=jest-junit"
+    '''
       }
       post {
         always {
-          junit 'reports/junit/junit.xml'
-          archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/**/*.xml'
+          junit 'reports/junit.xml'
         }
       }
-    }
+    } 
 
     stage('Code Quality') {
       steps {
