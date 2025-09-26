@@ -1,1 +1,1 @@
-test('smoke', ()=>{ expect(1+1).toBe(2); });
+test('smoke', () => { expect(1 + 1).toBe(2); });
