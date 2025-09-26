@@ -36,24 +36,29 @@ pipeline {
 
     stage('Test (Jest in container)') {
       steps {
-        // run tests in a clean Node container so we don't depend on Jenkins host
         script {
-          docker.image('node:20-alpine').inside {
-            sh '''
-              set -e
-              npm ci
-              npx jest --runInBand --ci --reporters=default --reporters=jest-junit
-            '''
-          }
-        }
-      }
-      post {
-        always {
-          // publish JUnit even if tests fail (so you get green/red counts)
-          junit allowEmptyResults: true, testResults: 'reports/junit/*.xml'
-        }
+        sh '''
+          set -e
+          docker inspect -f . node:20-alpine >/dev/null 2>&1 || docker pull node:20-alpine
+        '''
+      docker.image('node:20-alpine').inside('-u 1000:1000') {
+        sh '''
+          set -e
+          npm ci
+          mkdir -p reports/junit
+          # Enable Node's ESM support for Jest and run tests in-band
+          NODE_OPTIONS=--experimental-vm-modules npx jest --runInBand
+        '''
       }
     }
+  }
+  post {
+    always {
+      // This will now find ./reports/junit/junit.xml even on test failure
+      junit allowEmptyResults: false, testResults: '**/reports/junit/junit.xml'
+    }
+  }
+}
 
     stage('Code Quality') {
       when { expression { fileExists('package.json') } }
@@ -67,7 +72,7 @@ pipeline {
       steps {
         script {
           docker.withRegistry(env.REGISTRY_URL, 'dockerhub') {
-            // container scan of the image we just built (won’t fail the build)
+            
             sh """
               docker pull ${DOCKER_NAMESPACE}/${IMAGE_NAME}:${COMMIT}
               docker run --rm \
