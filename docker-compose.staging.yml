@@ -1,0 +1,10 @@
+
+services:
+  app:
+    build: .
+    image: ${REGISTRY:-local}/sit753-7-3hd-pipeline:${TAG:-staging}
+    environment:
+      - APP_VERSION=${TAG:-staging}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped

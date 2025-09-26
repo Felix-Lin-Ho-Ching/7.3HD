@@ -1,0 +1,9 @@
+
+services:
+  app:
+    image: ${REGISTRY}/sit753-7-3hd-pipeline:${TAG}
+    environment:
+      - APP_VERSION=${TAG}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
