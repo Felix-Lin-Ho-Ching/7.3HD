@@ -3,12 +3,12 @@ pipeline {
   agent any
 
   environment {
-    REGISTRY = credentials('REGISTRY_URL') // or set as plain text env
+    REGISTRY = credentials('REGISTRY_URL') 
     DOCKERHUB_USER = credentials('DOCKERHUB_USER')
     DOCKERHUB_PASS = credentials('DOCKERHUB_PASS')
     SONAR_HOST_URL = credentials('SONAR_HOST_URL')
     SONAR_TOKEN = credentials('SONAR_TOKEN')
-    SNYK_TOKEN = credentials('SNYK_TOKEN') // optional
+    SNYK_TOKEN = credentials('SNYK_TOKEN') 
     APP = 'sit753-7-3hd-pipeline'
   }
 
@@ -86,8 +86,8 @@ pipeline {
           TAG=${GIT_SHA} REGISTRY=${REGISTRY} docker compose -f docker-compose.staging.yml up -d --pull=always --build
           # Smoke health check
           sleep 2
-          curl -fsS http://localhost:3000/healthz
-          curl -fsS http://localhost:3000/api/version
+          curl -fsS http://host.docker.internal:3000/healthz
+          curl -fsS http://host.docker.internal:3000/api/version
         '''
       }
     }
@@ -108,7 +108,7 @@ pipeline {
       steps {
         sh '''#!/bin/sh
           # Verify metrics endpoint is live
-          curl -fsS http://localhost:3000/metrics | head -n 5
+          curl -fsS http://host.docker.internal:3000/metrics | head -n 5
         '''
       }
     }
