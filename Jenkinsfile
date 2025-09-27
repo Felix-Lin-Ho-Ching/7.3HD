@@ -147,99 +147,68 @@ stage('Verify deps in image') {
   }
 }
 
-stage('Security (optional)') {
-  steps {
+    stage('Security (optional)') {
+    steps {
     sh '''
       set -eu
 
-      # POSIX-safe short SHA (avoid ${GIT_COMMIT::7})
-      SHORT="$(git rev-parse --short=7 HEAD)"
+      # Normalize .trivyignore -> strip inline comments, CRLF, blanks; keep only IDs
+      awk '{sub(/#.*/,""); gsub(/\r/,""); if (NF) print $1}' .trivyignore > .trivyignore.clean
 
-      # Normalize .trivyignore -> strip comments/CRLF/blanks; keep only IDs
-      awk '{sub(/#.*/,""); gsub(/\\r/,""); if (NF) print $1}' .trivyignore > .trivyignore.clean
-      echo "Using ignore list:"; cat .trivyignore.clean
+      echo "Using ignore list:"
+      cat .trivyignore.clean
 
       docker run --rm \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        -v "$PWD/.trivycache":/root/.cache \
-        -v "$PWD/.trivyignore.clean":/tmp/.trivyignore:ro \
-        aquasec/trivy:0.54.1 image \
-        --ignorefile /tmp/.trivyignore \
-        --scanners vuln \
-        --vuln-type os,library \
-        --skip-dirs /usr/local/lib/node_modules \
-        --severity HIGH,CRITICAL \
-        --exit-code 1 \
-        "sugardark/sit753-7-3hd-pipeline:${SHORT}"
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD/.trivycache":/root/.cache \
+  aquasec/trivy:0.54.1 image \
+  --scanners vuln \
+  --vuln-type os,library \
+  --skip-dirs /usr/local/lib/node_modules \
+  --severity HIGH,CRITICAL \
+  --exit-code 1 \
+  sugardark/sit753-7-3hd-pipeline:${GIT_COMMIT::7}
     '''
   }
 }
 
-stage('Deploy: Staging') {
-  steps {
-    sh '''#!/bin/sh
-set -eu
-
-SHORT="$(git rev-parse --short=7 HEAD)"
-IMAGE="sugardark/sit753-7-3hd-pipeline:${SHORT}"
-
-docker rm -f app-staging || true
-docker run -d --name app-staging -p 3001:3000 -e APP_VERSION="${SHORT}" "${IMAGE}"
-
-# wait up to 60s for health (curl from inside the container's netns)
-i=0
-until docker run --rm --network container:app-staging curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null; do
-  if [ "$(docker inspect -f '{{.State.Running}}' app-staging)" != "true" ]; then
-    echo "app-staging is not running"; docker logs app-staging || true; exit 1
-  fi
-  i=$((i+1))
-  [ $i -ge 60 ] && { echo "timeout waiting for app-staging"; docker logs app-staging || true; exit 1; }
-  sleep 1
-done
-
-echo "staging healthy"
-'''
-  }
-}
+    stage('Deploy: Staging') {
+      steps {
+        sh """
+          set -e
+          docker rm -f app-staging || true
+          docker run -d --name app-staging -p 3001:3000 \
+            -e APP_VERSION=${SHORT_COMMIT} \
+            ${DOCKER_IMAGE}:${SHORT_COMMIT}
+          # wait for health
+          for i in {1..30}; do curl -fsS http://localhost:3001/healthz && break; sleep 1; done
+        """
+      }
+    }
 
     stage('Release: Production') {
-  steps {
-    sh '''#!/bin/sh
-set -eu
+      steps {
+        sh """
+          set -e
+          docker rm -f app-prod || true
+          docker run -d --name app-prod -p 3000:3000 \
+            -e APP_VERSION=${SHORT_COMMIT} \
+            ${DOCKER_IMAGE}:${SHORT_COMMIT}
+          for i in {1..30}; do curl -fsS http://localhost:3000/healthz && break; sleep 1; done
+        """
+      }
+    }
 
-SHORT="$(git rev-parse --short=7 HEAD)"
-IMAGE="sugardark/sit753-7-3hd-pipeline:${SHORT}"
-
-docker rm -f app-prod || true
-docker run -d --name app-prod -p 3000:3000 -e APP_VERSION="${SHORT}" "${IMAGE}"
-
-i=0
-until docker run --rm --network container:app-prod curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null; do
-  if [ "$(docker inspect -f '{{.State.Running}}' app-prod)" != "true" ]; then
-    echo "app-prod is not running"; docker logs app-prod || true; exit 1
-  fi
-  i=$((i+1))
-  [ $i -ge 60 ] && { echo "timeout waiting for app-prod"; docker logs app-prod || true; exit 1; }
-  sleep 1
-done
-
-echo "prod healthy"
-'''
+    stage('Monitoring Check') {
+      steps {
+        sh '''
+          set -e
+          curl -fsS http://localhost:3000/healthz | grep -q '"ok":true'
+          curl -fsS http://localhost:3000/metrics | grep -q http_request_duration_seconds
+        '''
+      }
+    }
   }
-}
-
-
-
-stage('Monitoring Check') {
-  steps {
-    sh '''#!/bin/sh
-set -eu
-# Check prod health from inside the prod container netns and assert response body
-docker run --rm --network container:app-prod curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz | grep -q '"ok":true'
-echo "Monitoring OK"
-'''
-  }
-}
 
   post {
     always {
