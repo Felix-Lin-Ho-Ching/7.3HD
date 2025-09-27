@@ -132,7 +132,21 @@ stage('Code Quality (SonarQube)') {
   }
 }
 
-  
+stage('Verify deps in image') {
+  steps {
+    sh """
+      echo 'In-image cross-spawn version:' &&
+      docker run --rm ${DOCKER_IMAGE}:${SHORT_COMMIT} node -p "require('cross-spawn/package.json').version" || true
+
+      echo 'In-image package.json declares:' &&
+      docker run --rm ${DOCKER_IMAGE}:${SHORT_COMMIT} node -e "const p=require('/app/package.json'); console.log('deps:',p.dependencies?.['cross-spawn'],'devDeps:',p.devDependencies?.['cross-spawn'])" || true
+
+      echo 'Lockfile mentions:' &&
+      docker run --rm ${DOCKER_IMAGE}:${SHORT_COMMIT} sh -lc "grep -n '\"cross-spawn\"' /app/package-lock.json | head -n 10" || true
+    """
+  }
+}
+
     stage('Security (optional)') {
       steps {
         script {
