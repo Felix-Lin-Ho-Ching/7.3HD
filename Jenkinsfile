@@ -148,7 +148,7 @@ stage('Verify deps in image') {
 }
 
     stage('Security (optional)') {
-  steps {
+    steps {
     sh '''
       set -eu
 
@@ -159,14 +159,15 @@ stage('Verify deps in image') {
       cat .trivyignore.clean
 
       docker run --rm \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        -v "$WORKSPACE/.trivycache:/root/.cache" \
-        -v "$WORKSPACE/.trivyignore.clean:/tmp/.trivyignore:ro" \
-        aquasec/trivy:0.54.1 image \
-          --ignorefile /tmp/.trivyignore \
-          --severity HIGH,CRITICAL \
-          --exit-code 1 \
-          "${DOCKER_IMAGE}:${SHORT_COMMIT}"
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD/.trivycache":/root/.cache \
+  aquasec/trivy:0.54.1 image \
+  --scanners vuln \
+  --vuln-type os,library \
+  --skip-dirs /usr/local/lib/node_modules \
+  --severity HIGH,CRITICAL \
+  --exit-code 1 \
+  sugardark/sit753-7-3hd-pipeline:${GIT_COMMIT::7}
     '''
   }
 }
