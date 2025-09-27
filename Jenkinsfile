@@ -85,20 +85,26 @@ stage('Test (Jest in container)') {
       string(credentialsId: 'sonar-token',    variable: 'SONAR_TOKEN')
     ]) {
       sh '''
-        set -e
+        set -euxo pipefail
 
-        # ===== verify the file is in the Jenkins workspace =====
-        echo "PWD in Code Quality: $PWD"
+        echo "=== Host workspace ==="
+        pwd
         ls -al
-        if [ -f sonar-project.properties ]; then
-          echo "Found sonar-project.properties:"
-          cat sonar-project.properties
-        else
+        if [ ! -f sonar-project.properties ]; then
           echo "sonar-project.properties is MISSING in workspace" >&2
           exit 1
         fi
+        echo "--- sonar-project.properties (host):"
+        sed -n "1,200p" sonar-project.properties
 
-        # ===== run scanner against this directory explicitly =====
+        echo "=== Inside container (sanity check) ==="
+        docker run --rm -v "$PWD:/usr/src" -w /usr/src alpine:3.20 sh -lc '
+          pwd; ls -al;
+          echo "--- sonar-project.properties (container):";
+          sed -n "1,200p" /usr/src/sonar-project.properties || true
+        '
+
+        echo "=== Sonar scan ==="
         docker run --rm --add-host=host.docker.internal:host-gateway \
           -e SONAR_HOST_URL="$SONAR_HOST_URL" \
           -e SONAR_LOGIN="$SONAR_TOKEN" \
@@ -107,14 +113,12 @@ stage('Test (Jest in container)') {
           -Dsonar.host.url="$SONAR_HOST_URL" \
           -Dsonar.login="$SONAR_TOKEN" \
           -Dsonar.projectBaseDir=/usr/src \
-          \
-          # ----- belt-and-suspenders: pass required props inline -----
           -Dsonar.projectKey=sit753-7-3hd \
           -Dsonar.projectName="SIT753-7.3HD" \
           -Dsonar.sources=src \
           -Dsonar.tests=tests,src/__tests__ \
-          -Dsonar.test.inclusions="**/*.test.js,**/*.spec.js" \
-          -Dsonar.exclusions="**/node_modules/**,**/reports/**"
+          -Dsonar.test.inclusions=**/*.test.js,**/*.spec.js \
+          -Dsonar.exclusions=**/node_modules/**,**/reports/**
       '''
     }
   }
