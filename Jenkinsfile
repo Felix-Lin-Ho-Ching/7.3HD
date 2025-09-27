@@ -149,10 +149,9 @@ stage('Verify deps in image') {
 
     stage('Security (optional)') {
       steps {
-        script {
-          
-     sh """
-        set -euo pipefail
+        script {          
+        sh """
+        set -eu
         docker run --rm \
           -v /var/run/docker.sock:/var/run/docker.sock \
           -v "$WORKSPACE/.trivycache:/root/.cache/" \
