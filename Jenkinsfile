@@ -148,22 +148,28 @@ stage('Verify deps in image') {
 }
 
     stage('Security (optional)') {
-      steps {
-        script {          
-        sh """
-        set -eu
-        docker run --rm \
-          -v /var/run/docker.sock:/var/run/docker.sock \
-          -v "$WORKSPACE/.trivycache:/root/.cache/" \
-          -v "$WORKSPACE/.trivyignore:/tmp/.trivyignore:ro" \
-          aquasec/trivy:0.54.1 image \
+  steps {
+    sh '''
+      set -eu
+
+      # Normalize .trivyignore -> strip inline comments, CRLF, blanks; keep only IDs
+      awk '{sub(/#.*/,""); gsub(/\r/,""); if (NF) print $1}' .trivyignore > .trivyignore.clean
+
+      echo "Using ignore list:"
+      cat .trivyignore.clean
+
+      docker run --rm \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v "$WORKSPACE/.trivycache:/root/.cache" \
+        -v "$WORKSPACE/.trivyignore.clean:/tmp/.trivyignore:ro" \
+        aquasec/trivy:0.54.1 image \
           --ignorefile /tmp/.trivyignore \
-          --exit-code 1 --severity HIGH,CRITICAL \
-          ${DOCKER_IMAGE}:${SHORT_COMMIT}
-      """
-        }
-      }
-    }
+          --severity HIGH,CRITICAL \
+          --exit-code 1 \
+          "${DOCKER_IMAGE}:${SHORT_COMMIT}"
+    '''
+  }
+}
 
     stage('Deploy: Staging') {
       steps {
