@@ -1,12 +1,10 @@
 export default {
-    testEnvironment: "node",
-    transform: {},
-    testMatch: ["**/tests/**/*.test.js", "**/src/**/__tests__/**/*.test.js"],
-    reporters: [
-        "default",
-        ["jest-junit", { outputDirectory: "reports/junit", outputName: "junit.xml" }]
-    ],
-    detectOpenHandles: true,
-    forceExit: true,
-    testTimeout: 20000
+  testEnvironment: 'node',
+  transform: {},                                // no Babel needed for plain ESM
+  testMatch: ['**/?(*.)+(spec|test).[jt]s?(x)'], // find tests anywhere under the repo
+  moduleFileExtensions: ['js','jsx','json','node'],
+  reporters: [
+    'default',
+    ['jest-junit', { outputDirectory: 'reports/junit', outputName: 'junit.xml' }]
+  ]
 };

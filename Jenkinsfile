@@ -23,12 +23,10 @@ pipeline {
     stage('Build & Push Image') {
       steps {
         script {
-          // build image with commit tag
-          def img = docker.build("${env.DOCKER_NAMESPACE}/${env.IMAGE_NAME}:${env.COMMIT}")
-          // login + push (uses the 'dockerhub' credential you created)
+          def img = docker.build("${env.DOCKER_NAMESPACE}/${env.IMAGE_NAME}:${env.COMMIT}")         
           docker.withRegistry(env.REGISTRY_URL, 'dockerhub') {
-            img.push()          // push commit tag
-            img.push('latest')  // update :latest
+            img.push()          
+            img.push('latest')  
           }
         }
       }
@@ -51,8 +49,7 @@ pipeline {
           }
         }
         post {
-          always {
-      
+          always {      
             junit allowEmptyResults: true, testResults: 'reports/**/*.xml'
             archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/**/*'
           }
