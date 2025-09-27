@@ -77,30 +77,29 @@ stage('Test (Jest in container)') {
     }
   }
 }
-
-  stage('Code Quality (SonarQube)') {
+    stage('Code Quality (SonarQube)') {
   steps {
     withCredentials([
       string(credentialsId: 'sonar-host-url', variable: 'SONAR_HOST_URL'),
       string(credentialsId: 'sonar-token',    variable: 'SONAR_TOKEN')
     ]) {
-      sh '''
-        set -euxo pipefail
+      sh '''#!/bin/sh
+        set -e
 
         echo "=== Host workspace ==="
         pwd
         ls -al
         if [ ! -f sonar-project.properties ]; then
-          echo "sonar-project.properties is MISSING in workspace" >&2
+          echo "sonar-project.properties is MISSING" >&2
           exit 1
         fi
         echo "--- sonar-project.properties (host):"
         sed -n "1,200p" sonar-project.properties
 
-        echo "=== Inside container (sanity check) ==="
+        echo "=== Inside container (verify mount) ==="
         docker run --rm -v "$PWD:/usr/src" -w /usr/src alpine:3.20 sh -lc '
           pwd; ls -al;
-          echo "--- sonar-project.properties (container):";
+          echo "--- sonar-project.properties (container):"
           sed -n "1,200p" /usr/src/sonar-project.properties || true
         '
 
@@ -117,14 +116,14 @@ stage('Test (Jest in container)') {
           -Dsonar.projectName="SIT753-7.3HD" \
           -Dsonar.sources=src \
           -Dsonar.tests=tests,src/__tests__ \
-          -Dsonar.test.inclusions=**/*.test.js,**/*.spec.js \
-          -Dsonar.exclusions=**/node_modules/**,**/reports/**
+          -Dsonar.test.inclusions="**/*.test.js,**/*.spec.js" \
+          -Dsonar.exclusions="**/node_modules/**,**/reports/**"
       '''
     }
   }
 }
 
-
+  
     stage('Security (optional)') {
       steps {
         script {
