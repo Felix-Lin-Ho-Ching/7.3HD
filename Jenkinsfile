@@ -35,30 +35,29 @@ pipeline {
     }
 
     stage('Test (Jest in container)') {
-      steps {
-        script {
-        sh '''
-          set -e
-          docker inspect -f . node:20-alpine >/dev/null 2>&1 || docker pull node:20-alpine
-        '''
-      docker.image('node:20-alpine').inside('-u 1000:1000') {
-        sh '''
-          set -e
-          npm ci
-          mkdir -p reports/junit
-          # Enable Node's ESM support for Jest and run tests in-band
-          NODE_OPTIONS=--experimental-vm-modules npx jest --runInBand
-        '''
+      options { timeout(time: 5, unit: 'MINUTES') }   // never hang forever
+        steps {
+          script {
+            withDockerContainer(image: 'node:20-alpine') {
+              sh '''
+                set -euxo pipefail
+                npm ci
+                mkdir -p reports/junit
+                NODE_OPTIONS=--experimental-vm-modules npx jest --ci --runInBand
+                echo "== Files under reports/ =="
+                find reports -type f -maxdepth 3 -print || true
+              '''
+            }
+          }
+        }
+        post {
+          always {
+      
+            junit allowEmptyResults: true, testResults: 'reports/**/*.xml'
+            archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/**/*'
+          }
+        }
       }
-    }
-  }
-  post {
-    always {
-      // This will now find ./reports/junit/junit.xml even on test failure
-      junit allowEmptyResults: false, testResults: '**/reports/junit/junit.xml'
-    }
-  }
-}
 
     stage('Code Quality') {
       when { expression { fileExists('package.json') } }

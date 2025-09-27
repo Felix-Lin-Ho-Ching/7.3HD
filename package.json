@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "node src/app.js",
-    "test": "jest --runInBand --ci --reporters=default --reporters=jest-junit",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --ci --runInBand",
     "lint": "echo \"Add ESLint if desired\""
   },
   "dependencies": {
@@ -16,7 +16,7 @@
   "devDependencies": {
     "jest": "^29.7.0",
     "jest-junit": "^16.0.0",
-    "supertest": "^7.0.0"
+    "supertest": "^6.3.4"
   },
   "jest-junit": {
     "outputDirectory": "reports",
