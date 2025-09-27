@@ -147,27 +147,30 @@ stage('Verify deps in image') {
   }
 }
 
-    stage('Security (optional)') {
-    steps {
+stage('Security (optional)') {
+  steps {
     sh '''
       set -eu
 
-      # Normalize .trivyignore -> strip inline comments, CRLF, blanks; keep only IDs
-      awk '{sub(/#.*/,""); gsub(/\r/,""); if (NF) print $1}' .trivyignore > .trivyignore.clean
+      # POSIX-safe short SHA (avoid ${GIT_COMMIT::7})
+      SHORT="$(git rev-parse --short=7 HEAD)"
 
-      echo "Using ignore list:"
-      cat .trivyignore.clean
+      # Normalize .trivyignore -> strip comments/CRLF/blanks; keep only IDs
+      awk '{sub(/#.*/,""); gsub(/\\r/,""); if (NF) print $1}' .trivyignore > .trivyignore.clean
+      echo "Using ignore list:"; cat .trivyignore.clean
 
       docker run --rm \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$PWD/.trivycache":/root/.cache \
-  aquasec/trivy:0.54.1 image \
-  --scanners vuln \
-  --vuln-type os,library \
-  --skip-dirs /usr/local/lib/node_modules \
-  --severity HIGH,CRITICAL \
-  --exit-code 1 \
-  sugardark/sit753-7-3hd-pipeline:${GIT_COMMIT::7}
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v "$PWD/.trivycache":/root/.cache \
+        -v "$PWD/.trivyignore.clean":/tmp/.trivyignore:ro \
+        aquasec/trivy:0.54.1 image \
+        --ignorefile /tmp/.trivyignore \
+        --scanners vuln \
+        --vuln-type os,library \
+        --skip-dirs /usr/local/lib/node_modules \
+        --severity HIGH,CRITICAL \
+        --exit-code 1 \
+        "sugardark/sit753-7-3hd-pipeline:${SHORT}"
     '''
   }
 }
