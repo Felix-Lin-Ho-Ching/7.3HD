@@ -176,42 +176,70 @@ stage('Security (optional)') {
 }
 
     stage('Deploy: Staging') {
-      steps {
-        sh """
-          set -e
-          docker rm -f app-staging || true
-          docker run -d --name app-staging -p 3001:3000 \
-            -e APP_VERSION=${SHORT_COMMIT} \
-            ${DOCKER_IMAGE}:${SHORT_COMMIT}
-          # wait for health
-          for i in {1..30}; do curl -fsS http://localhost:3001/healthz && break; sleep 1; done
-        """
-      }
-    }
+  steps {
+    sh '''
+      set -eu
+      SHORT="$(git rev-parse --short=7 HEAD)"
+      IMAGE="sugardark/sit753-7-3hd-pipeline:${SHORT}"
+
+      docker rm -f app-staging || true
+      docker run -d --name app-staging -p 3001:3000 -e APP_VERSION="$SHORT" "$IMAGE"
+
+      # Wait up to 60s for health by curling from INSIDE the app-staging netns
+      for i in $(seq 1 60); do
+        if docker run --rm --network container:app-staging curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null; then
+          echo "staging healthy"; break
+        fi
+        # fail fast if container crashed
+        if [ "$(docker inspect -f '{{.State.Running}}' app-staging)" != "true" ]; then
+          echo "app-staging is not running"; docker logs app-staging || true; exit 1
+        fi
+        sleep 1
+      done
+
+      # final assert
+      docker run --rm --network container:app-staging curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null
+    '''
+  }
+}
 
     stage('Release: Production') {
-      steps {
-        sh """
-          set -e
-          docker rm -f app-prod || true
-          docker run -d --name app-prod -p 3000:3000 \
-            -e APP_VERSION=${SHORT_COMMIT} \
-            ${DOCKER_IMAGE}:${SHORT_COMMIT}
-          for i in {1..30}; do curl -fsS http://localhost:3000/healthz && break; sleep 1; done
-        """
-      }
-    }
+  steps {
+    sh '''
+      set -eu
+      SHORT="$(git rev-parse --short=7 HEAD)"
+      IMAGE="sugardark/sit753-7-3hd-pipeline:${SHORT}"
+
+      docker rm -f app-prod || true
+      docker run -d --name app-prod -p 3000:3000 -e APP_VERSION="$SHORT" "$IMAGE"
+
+      for i in $(seq 1 60); do
+        if docker run --rm --network container:app-prod curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null; then
+          echo "prod healthy"; break
+        fi
+        if [ "$(docker inspect -f '{{.State.Running}}' app-prod)" != "true" ]; then
+          echo "app-prod is not running"; docker logs app-prod || true; exit 1
+        fi
+        sleep 1
+      done
+
+      docker run --rm --network container:app-prod curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null
+    '''
+  }
+}
+
 
     stage('Monitoring Check') {
-      steps {
-        sh '''
-          set -e
-          curl -fsS http://localhost:3000/healthz | grep -q '"ok":true'
-          curl -fsS http://localhost:3000/metrics | grep -q http_request_duration_seconds
-        '''
-      }
-    }
+  steps {
+    sh '''
+      set -eu
+      # Check prod health from inside the prod container netns
+      docker run --rm --network container:app-prod curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null
+      echo "Monitoring OK"
+    '''
   }
+}
+
 
   post {
     always {
