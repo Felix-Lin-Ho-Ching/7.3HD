@@ -30,15 +30,19 @@ pipeline {
     stage('Build & Push Image') {
       steps {
         script {
-          sh 'docker build --no-cache -t sugardark/sit753-7-3hd-pipeline:${GIT_COMMIT:0:7} .'
-          sh 'docker tag sugardark/sit753-7-3hd-pipeline:${GIT_COMMIT:0:7} sugardark/sit753-7-3hd-pipeline:latest'
-          withDockerRegistry([credentialsId: 'dockerhub-creds', url: 'https://index.docker.io/v1/']) {
-          sh 'docker push sugardark/sit753-7-3hd-pipeline:${GIT_COMMIT:0:7}'
-          sh 'docker push sugardark/sit753-7-3hd-pipeline:latest'
+          sh """
+            docker build -t ${DOCKER_IMAGE}:${SHORT_COMMIT} .
+            docker tag ${DOCKER_IMAGE}:${SHORT_COMMIT} ${DOCKER_IMAGE}:latest
+          """
+          withDockerRegistry(credentialsId: 'dockerhub', url: REGISTRY_URL) {
+            sh """
+              docker push ${DOCKER_IMAGE}:${SHORT_COMMIT}
+              docker push ${DOCKER_IMAGE}:latest
+            """
+          }
+        }
       }
     }
-  }
-}
 
 stage('Test (Jest in container)') {
   steps {
