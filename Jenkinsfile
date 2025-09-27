@@ -177,69 +177,70 @@ stage('Security (optional)') {
 
     stage('Deploy: Staging') {
   steps {
-    sh '''
-      set -eu
-      SHORT="$(git rev-parse --short=7 HEAD)"
-      IMAGE="sugardark/sit753-7-3hd-pipeline:${SHORT}"
+    sh '''#!/bin/sh
+set -eu
 
-      docker rm -f app-staging || true
-      docker run -d --name app-staging -p 3001:3000 -e APP_VERSION="$SHORT" "$IMAGE"
+SHORT="$(git rev-parse --short=7 HEAD)"
+IMAGE="sugardark/sit753-7-3hd-pipeline:${SHORT}"
 
-      # Wait up to 60s for health by curling from INSIDE the app-staging netns
-      for i in $(seq 1 60); do
-        if docker run --rm --network container:app-staging curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null; then
-          echo "staging healthy"; break
-        fi
-        # fail fast if container crashed
-        if [ "$(docker inspect -f '{{.State.Running}}' app-staging)" != "true" ]; then
-          echo "app-staging is not running"; docker logs app-staging || true; exit 1
-        fi
-        sleep 1
-      done
+docker rm -f app-staging || true
+docker run -d --name app-staging -p 3001:3000 -e APP_VERSION="${SHORT}" "${IMAGE}"
 
-      # final assert
-      docker run --rm --network container:app-staging curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null
-    '''
+# wait up to 60s for health (curl from inside the container's netns)
+i=0
+until docker run --rm --network container:app-staging curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null; do
+  if [ "$(docker inspect -f '{{.State.Running}}' app-staging)" != "true" ]; then
+    echo "app-staging is not running"; docker logs app-staging || true; exit 1
+  fi
+  i=$((i+1))
+  [ $i -ge 60 ] && { echo "timeout waiting for app-staging"; docker logs app-staging || true; exit 1; }
+  sleep 1
+done
+
+echo "staging healthy"
+'''
   }
 }
 
-    stage('Release: Production') {
+stage('Release: Production') {
   steps {
-    sh '''
-      set -eu
-      SHORT="$(git rev-parse --short=7 HEAD)"
-      IMAGE="sugardark/sit753-7-3hd-pipeline:${SHORT}"
+    sh '''#!/bin/sh
+set -eu
 
-      docker rm -f app-prod || true
-      docker run -d --name app-prod -p 3000:3000 -e APP_VERSION="$SHORT" "$IMAGE"
+SHORT="$(git rev-parse --short=7 HEAD)"
+IMAGE="sugardark/sit753-7-3hd-pipeline:${SHORT}"
 
-      for i in $(seq 1 60); do
-        if docker run --rm --network container:app-prod curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null; then
-          echo "prod healthy"; break
-        fi
-        if [ "$(docker inspect -f '{{.State.Running}}' app-prod)" != "true" ]; then
-          echo "app-prod is not running"; docker logs app-prod || true; exit 1
-        fi
-        sleep 1
-      done
+docker rm -f app-prod || true
+docker run -d --name app-prod -p 3000:3000 -e APP_VERSION="${SHORT}" "${IMAGE}"
 
-      docker run --rm --network container:app-prod curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null
-    '''
+i=0
+until docker run --rm --network container:app-prod curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null; do
+  if [ "$(docker inspect -f '{{.State.Running}}' app-prod)" != "true" ]; then
+    echo "app-prod is not running"; docker logs app-prod || true; exit 1
+  fi
+  i=$((i+1))
+  [ $i -ge 60 ] && { echo "timeout waiting for app-prod"; docker logs app-prod || true; exit 1; }
+  sleep 1
+done
+
+echo "prod healthy"
+'''
   }
 }
 
 
-    stage('Monitoring Check') {
+   stage('Monitoring Check') {
   steps {
-    sh '''
-      set -eu
-      # Check prod health from inside the prod container netns
-      docker run --rm --network container:app-prod curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz >/dev/null
-      echo "Monitoring OK"
-    '''
+    sh '''#!/bin/sh
+set -eu
+# Check prod health from inside the prod container netns and assert response body
+docker run --rm --network container:app-prod curlimages/curl:8.10.1 -fsS http://127.0.0.1:3000/healthz | grep -q '"ok":true'
+echo "Monitoring OK"
+'''
   }
 }
 
+  }
 
   post {
     always {
