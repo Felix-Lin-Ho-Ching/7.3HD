@@ -77,7 +77,7 @@ stage('Test (Jest in container)') {
     }
   }
 }
-    stage('Code Quality (SonarQube)') {
+stage('Code Quality (SonarQube)') {
   steps {
     withCredentials([
       string(credentialsId: 'sonar-host-url', variable: 'SONAR_HOST_URL'),
@@ -89,35 +89,38 @@ stage('Test (Jest in container)') {
         echo "=== Host workspace ==="
         pwd
         ls -al
-        if [ ! -f sonar-project.properties ]; then
-          echo "sonar-project.properties is MISSING" >&2
-          exit 1
-        fi
-        echo "--- sonar-project.properties (host):"
-        sed -n "1,200p" sonar-project.properties
+        [ -f sonar-project.properties ] || { echo "sonar-project.properties missing"; exit 1; }
+        echo "--- sonar-project.properties (host) ---"
+        sed -n '1,200p' sonar-project.properties
 
-        echo "=== Inside container (verify mount) ==="
-        docker run --rm -v "$PWD:/usr/src" -w /usr/src alpine:3.20 sh -lc '
-          pwd; ls -al;
-          echo "--- sonar-project.properties (container):"
-          sed -n "1,200p" /usr/src/sonar-project.properties || true
+        echo "=== Inside container (verify mount via --volumes-from) ==="
+        docker run --rm --volumes-from "$HOSTNAME" -w "$PWD" alpine:3.20 sh -lc '
+          echo PWD: $(pwd)
+          ls -al
+          echo "--- sonar-project.properties (container) ---"
+          sed -n "1,200p" sonar-project.properties
+          echo "--- check tests & src ---"
+          ls -al tests || true
+          ls -al src || true
         '
 
         echo "=== Sonar scan ==="
         docker run --rm --add-host=host.docker.internal:host-gateway \
+          --volumes-from "$HOSTNAME" \
+          -w "$PWD" \
           -e SONAR_HOST_URL="$SONAR_HOST_URL" \
           -e SONAR_LOGIN="$SONAR_TOKEN" \
-          -v "$PWD:/usr/src" -w /usr/src \
           sonarsource/sonar-scanner-cli:latest \
           -Dsonar.host.url="$SONAR_HOST_URL" \
           -Dsonar.login="$SONAR_TOKEN" \
-          -Dsonar.projectBaseDir=/usr/src \
+          -Dsonar.projectBaseDir="$PWD" \
           -Dsonar.projectKey=sit753-7-3hd \
           -Dsonar.projectName="SIT753-7.3HD" \
           -Dsonar.sources=src \
           -Dsonar.tests=tests,src/__tests__ \
           -Dsonar.test.inclusions="**/*.test.js,**/*.spec.js" \
-          -Dsonar.exclusions="**/node_modules/**,**/reports/**"
+          -Dsonar.exclusions="**/node_modules/**,**/reports/**" \
+          -Dsonar.sourceEncoding=UTF-8
       '''
     }
   }
