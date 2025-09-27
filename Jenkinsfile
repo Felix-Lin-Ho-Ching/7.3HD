@@ -27,22 +27,28 @@ pipeline {
       }
     }
 
-    stage('Build & Push Image') {
-      steps {
-        script {
-          sh """
-            docker build -t ${DOCKER_IMAGE}:${SHORT_COMMIT} .
-            docker tag ${DOCKER_IMAGE}:${SHORT_COMMIT} ${DOCKER_IMAGE}:latest
-          """
-          withDockerRegistry(credentialsId: 'dockerhub', url: REGISTRY_URL) {
-            sh """
-              docker push ${DOCKER_IMAGE}:${SHORT_COMMIT}
-              docker push ${DOCKER_IMAGE}:latest
-            """
-          }
-        }
+stage('Build & Push Image') {
+  steps {
+    script {
+      
+      if (!env.SHORT_COMMIT) {
+        env.SHORT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+      }
+
+      sh """
+        docker build -t ${env.DOCKER_IMAGE}:${env.SHORT_COMMIT} .
+        docker tag ${env.DOCKER_IMAGE}:${env.SHORT_COMMIT} ${env.DOCKER_IMAGE}:latest
+      """
+
+      withDockerRegistry(credentialsId: 'dockerhub', url: env.REGISTRY_URL) {
+        sh """
+          docker push ${env.DOCKER_IMAGE}:${env.SHORT_COMMIT}
+          docker push ${env.DOCKER_IMAGE}:latest
+        """
       }
     }
+  }
+}
 
 stage('Test (Jest in container)') {
   steps {
