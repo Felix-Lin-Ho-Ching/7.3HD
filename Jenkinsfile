@@ -31,7 +31,7 @@ pipeline {
       steps {
         script {
           sh """
-            docker build -t ${DOCKER_IMAGE}:${SHORT_COMMIT} .
+            sh 'docker build --no-cache -t sugardark/sit753-7-3hd-pipeline:${GIT_COMMIT:0:7} .'
             docker tag ${DOCKER_IMAGE}:${SHORT_COMMIT} ${DOCKER_IMAGE}:latest
           """
           withDockerRegistry(credentialsId: 'dockerhub', url: REGISTRY_URL) {
