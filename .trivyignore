@@ -1,0 +1,1 @@
+CVE-2024-21538 # cross-spawn resolved to 7.0.5/7.0.6 in image; manifest-only FP
