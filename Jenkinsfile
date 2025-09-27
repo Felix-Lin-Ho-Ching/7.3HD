@@ -1,110 +1,168 @@
 pipeline {
   agent any
-
   options {
     ansiColor('xterm')
     timestamps()
-    buildDiscarder(logRotator(numToKeepStr: '10'))
   }
-
   environment {
-    REGISTRY_URL     = 'https://index.docker.io/v1/'
-    DOCKER_NAMESPACE = 'sugardark'              // <-- change if your Docker Hub username is different
-    IMAGE_NAME       = 'sit753-7-3hd-pipeline'  // repo name on Docker Hub
-    COMMIT           = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+    DOCKER_IMAGE = "sugardark/sit753-7-3hd-pipeline"
+    REGISTRY_URL = "https://index.docker.io/v1/"
   }
 
   stages {
 
     stage('Checkout') {
-      steps { checkout scm }
+      steps {
+        checkout scm
+        script {
+          env.SHORT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+          echo "Commit: ${env.SHORT_COMMIT}"
+        }
+      }
     }
 
     stage('Build & Push Image') {
       steps {
         script {
-          def img = docker.build("${env.DOCKER_NAMESPACE}/${env.IMAGE_NAME}:${env.COMMIT}")         
-          docker.withRegistry(env.REGISTRY_URL, 'dockerhub') {
-            img.push()          
-            img.push('latest')  
-          }
-        }
-      }
-    }
-
-    stage('Test (Jest in container)') {
-      options { timeout(time: 5, unit: 'MINUTES') }   // never hang forever
-        steps {
-          script {
-            withDockerContainer(image: 'node:20-alpine') {
-              sh '''
-                set -euxo pipefail
-                npm ci
-                mkdir -p reports/junit
-                NODE_OPTIONS=--experimental-vm-modules npx jest --ci --runInBand
-                echo "== Files under reports/ =="
-                find reports -type f -maxdepth 3 -print || true
-              '''
-            }
-          }
-        }
-        post {
-          always {      
-            junit allowEmptyResults: true, testResults: 'reports/**/*.xml'
-            archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/**/*'
-          }
-        }
-      }
-
-    stage('Code Quality') {
-      when { expression { fileExists('package.json') } }
-      steps {
-        sh 'npm run lint || echo "Lint step skipped (no linter configured)"'
-      }
-    }
-
-    stage('Security (optional)') {
-      when { expression { return env.SNYK_TOKEN?.trim() } }
-      steps {
-        script {
-          docker.withRegistry(env.REGISTRY_URL, 'dockerhub') {
-            
+          sh """
+            docker build -t ${DOCKER_IMAGE}:${SHORT_COMMIT} .
+            docker tag ${DOCKER_IMAGE}:${SHORT_COMMIT} ${DOCKER_IMAGE}:latest
+          """
+          withDockerRegistry(credentialsId: 'dockerhub', url: REGISTRY_URL) {
             sh """
-              docker pull ${DOCKER_NAMESPACE}/${IMAGE_NAME}:${COMMIT}
-              docker run --rm \
-                -e SNYK_TOKEN=${SNYK_TOKEN} \
-                -v /var/run/docker.sock:/var/run/docker.sock \
-                snyk/snyk:docker test ${DOCKER_NAMESPACE}/${IMAGE_NAME}:${COMMIT} || true
+              docker push ${DOCKER_IMAGE}:${SHORT_COMMIT}
+              docker push ${DOCKER_IMAGE}:latest
             """
           }
         }
       }
     }
 
+    stage('Test (Jest in container)') {
+      steps {
+        script {
+          // run tests inside node container; create JUnit XML for Jenkins
+          docker.image('node:20-alpine').inside('-u 1000:1000') {
+            sh '''
+              set -e
+              # prefer ci, but fall back to install (lockfile changes are rare but safe)
+              npm ci || npm install --no-fund --no-audit
+              mkdir -p reports/junit
+              NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules npx jest --ci --runInBand --forceExit
+            '''
+          }
+        }
+      }
+      post {
+        always {
+          // publish junit results; do not fail the stage if file is missing (but it should be present)
+          junit allowEmptyResults: true, testResults: 'reports/junit/**/*.xml'
+        }
+      }
+    }
+
+    stage('Code Quality') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'sonar-host-url', variable: 'SONAR_HOST_URL'),
+          string(credentialsId: 'sonar-token',    variable: 'SONAR_TOKEN')
+        ]) {
+          sh '''
+            set -e
+            # Run Sonar Scanner in container (uses sonar-project.properties from repo)
+            docker run --rm \
+              -e SONAR_HOST_URL="$SONAR_HOST_URL" \
+              -e SONAR_LOGIN="$SONAR_TOKEN" \
+              -v "$WORKSPACE:/usr/src" \
+              sonarsource/sonar-scanner-cli:latest
+
+            # ---- Quality Gate poll (works without Jenkins Sonar plugin config) ----
+            RT="$(find "$WORKSPACE" -maxdepth 2 -name report-task.txt | head -n1)"
+            echo "Using report: $RT"
+            CE_URL="$(grep -E '^ceTaskUrl=' "$RT" | cut -d= -f2)"
+
+            # Wait for CE task to finish
+            ATTEMPTS=60
+            while [ $ATTEMPTS -gt 0 ]; do
+              RESP="$(curl -fsS -u "$SONAR_TOKEN:" "$CE_URL")" || true
+              STATUS="$(echo "$RESP" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p')"
+              if [ "$STATUS" = "SUCCESS" ]; then
+                ANALYSIS_ID="$(echo "$RESP" | sed -n 's/.*"analysisId":"\\([^"]*\\)".*/\\1/p')"
+                break
+              elif [ "$STATUS" = "FAILED" ]; then
+                echo "Sonar CE task failed: $RESP"; exit 1
+              fi
+              sleep 2; ATTEMPTS=$((ATTEMPTS-1))
+            done
+            [ -n "$ANALYSIS_ID" ] || { echo "Timed out waiting for Sonar analysis"; exit 1; }
+
+            QG_URL="$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID"
+            QG="$(curl -fsS -u "$SONAR_TOKEN:" "$QG_URL")"
+            QG_STATUS="$(echo "$QG" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p')"
+            echo "Quality Gate: $QG_STATUS"
+            [ "$QG_STATUS" = "OK" ] || { echo "$QG"; exit 1; }
+          '''
+        }
+      }
+    }
+
+    stage('Security (optional)') {
+      steps {
+        script {
+          // Trivy: fail on HIGH/CRITICAL vulns in the built image
+          sh """
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$WORKSPACE/.trivycache:/root/.cache/" \
+              aquasec/trivy:0.54.1 image \
+                --exit-code 1 --severity HIGH,CRITICAL \
+                ${DOCKER_IMAGE}:${SHORT_COMMIT}
+          """
+        }
+      }
+    }
+
     stage('Deploy: Staging') {
       steps {
-        echo "This is a placeholder. Tag to staging is ${DOCKER_NAMESPACE}/${IMAGE_NAME}:${COMMIT}"
+        sh """
+          set -e
+          docker rm -f app-staging || true
+          docker run -d --name app-staging -p 3001:3000 \
+            -e APP_VERSION=${SHORT_COMMIT} \
+            ${DOCKER_IMAGE}:${SHORT_COMMIT}
+          # wait for health
+          for i in {1..30}; do curl -fsS http://localhost:3001/healthz && break; sleep 1; done
+        """
       }
     }
 
     stage('Release: Production') {
-      when { branch 'main' }
       steps {
-        input message: "Promote ${COMMIT} to production?"
-        echo "Release approved."
+        sh """
+          set -e
+          docker rm -f app-prod || true
+          docker run -d --name app-prod -p 3000:3000 \
+            -e APP_VERSION=${SHORT_COMMIT} \
+            ${DOCKER_IMAGE}:${SHORT_COMMIT}
+          for i in {1..30}; do curl -fsS http://localhost:3000/healthz && break; sleep 1; done
+        """
       }
     }
 
     stage('Monitoring Check') {
       steps {
-        echo 'Run your /health or Prometheus scrape check here.'
+        sh '''
+          set -e
+          curl -fsS http://localhost:3000/healthz | grep -q '"ok":true'
+          curl -fsS http://localhost:3000/metrics | grep -q http_request_duration_seconds
+        '''
       }
     }
   }
 
   post {
     always {
-      echo "Pipeline finished for ${COMMIT}"
+      echo "Pipeline finished for ${env.SHORT_COMMIT}"
     }
   }
 }
