@@ -73,44 +73,22 @@ stage('Test (Jest in container)') {
 }
 
   stage('Code Quality') {
-    stage('Code Quality (SonarQube)') {
-      steps {
-        withCredentials([
-          string(credentialsId: 'sonar-host-url', variable: 'SONAR_HOST_URL'),
-          string(credentialsId: 'sonar-token',    variable: 'SONAR_TOKEN')
+    steps {
+      withCredentials([
+      string(credentialsId: 'sonar-host-url', variable: 'SONAR_HOST_URL'),
+      string(credentialsId: 'sonar-token',    variable: 'SONAR_TOKEN')
       ]) {
-            sh '''
-            set -e
-
-            # ===== verify the file is in the Jenkins workspace =====
-            echo "PWD in Code Quality: $PWD"
-            ls -al
-            if [ -f sonar-project.properties ]; then
-              echo "Found sonar-project.properties:"
-              cat sonar-project.properties
-            else
-              echo "sonar-project.properties is MISSING in workspace" >&2
-              exit 1
-            fi
-
-            # ===== run scanner against this directory explicitly =====
-            docker run --rm --add-host=host.docker.internal:host-gateway \
-              -e SONAR_HOST_URL="$SONAR_HOST_URL" \
-              -e SONAR_LOGIN="$SONAR_TOKEN" \
-              -v "$PWD:/usr/src" -w /usr/src \
-              sonarsource/sonar-scanner-cli:latest \
-              -Dsonar.host.url="$SONAR_HOST_URL" \
-              -Dsonar.login="$SONAR_TOKEN" \
-              -Dsonar.projectBaseDir=/usr/src \
-              \
-              # ----- belt-and-suspenders: pass required props inline -----
-              -Dsonar.projectKey=sit753-7-3hd \
-              -Dsonar.projectName="SIT753-7.3HD" \
-              -Dsonar.sources=src \
-              -Dsonar.tests=tests,src/__tests__ \
-              -Dsonar.test.inclusions="**/*.test.js,**/*.spec.js" \
-              -Dsonar.exclusions="**/node_modules/**,**/reports/**"
-          '''
+        sh '''
+        set -e
+        docker run --rm \
+          --add-host=host.docker.internal:host-gateway \
+          -e SONAR_HOST_URL=$SONAR_HOST_URL \
+          -e SONAR_LOGIN=$SONAR_TOKEN \
+          -v "$PWD:/usr/src" -w /usr/src \
+          sonarsource/sonar-scanner-cli:latest \
+          -Dsonar.host.url=$SONAR_HOST_URL \
+          -Dsonar.login=$SONAR_TOKEN
+        '''
     }
   }
 }
