@@ -38,28 +38,40 @@ pipeline {
       }
     }
 
-    stage('Test (Jest in container)') {
-      steps {
-        script {
-          // run tests inside node container; create JUnit XML for Jenkins
-          docker.image('node:20-alpine').inside('-u 1000:1000') {
-            sh '''
-              set -e
-              # prefer ci, but fall back to install (lockfile changes are rare but safe)
-              npm ci || npm install --no-fund --no-audit
-              mkdir -p reports/junit
-              NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules npx jest --ci --runInBand --forceExit
-            '''
-          }
-        }
-      }
-      post {
-        always {
-          // publish junit results; do not fail the stage if file is missing (but it should be present)
-          junit allowEmptyResults: true, testResults: 'reports/junit/**/*.xml'
-        }
+stage('Test (Jest in container)') {
+  steps {
+    script {
+      // ensure the base image is present
+      sh 'docker inspect -f . node:20-alpine || docker pull node:20-alpine'
+
+      docker.image('node:20-alpine').inside("-u 1000:1000") {
+        sh '''
+          set -e
+          npm ci
+          mkdir -p reports/junit
+
+          export NODE_ENV=test
+          export NODE_OPTIONS=--experimental-vm-modules
+
+          # Tell jest-junit where to write the report
+          export JEST_JUNIT_OUTPUT_DIR=reports/junit
+          export JEST_JUNIT_OUTPUT_NAME=junit.xml
+
+          # Run tests with reporters explicitly set
+          npx jest --ci --runInBand --forceExit --reporters=default --reporters=jest-junit
+
+          # Prove the file exists for Jenkins
+          ls -l reports/junit || true
+        '''
       }
     }
+  }
+  post {
+    always {
+      junit 'reports/junit/*.xml'
+    }
+  }
+}
 
     stage('Code Quality') {
       steps {
