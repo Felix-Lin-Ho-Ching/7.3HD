@@ -150,16 +150,18 @@ stage('Verify deps in image') {
     stage('Security (optional)') {
       steps {
         script {
-          // Trivy: fail on HIGH/CRITICAL vulns in the built image
-          sh """
-            docker run --rm \
-              -v /var/run/docker.sock:/var/run/docker.sock \
-              -v "$WORKSPACE/.trivycache:/root/.cache/" \
-              aquasec/trivy:0.54.1 image \
-              --ignorefile /tmp/.trivyignore \
-                --exit-code 1 --severity HIGH,CRITICAL \
-                ${DOCKER_IMAGE}:${SHORT_COMMIT}
-          """
+          
+     sh """
+        set -euo pipefail
+        docker run --rm \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -v "$WORKSPACE/.trivycache:/root/.cache/" \
+          -v "$WORKSPACE/.trivyignore:/tmp/.trivyignore:ro" \
+          aquasec/trivy:0.54.1 image \
+          --ignorefile /tmp/.trivyignore \
+          --exit-code 1 --severity HIGH,CRITICAL \
+          ${DOCKER_IMAGE}:${SHORT_COMMIT}
+      """
         }
       }
     }
