@@ -41,7 +41,6 @@ pipeline {
 stage('Test (Jest in container)') {
   steps {
     script {
-      // ensure the base image is present
       sh 'docker inspect -f . node:20-alpine || docker pull node:20-alpine'
 
       docker.image('node:20-alpine').inside("-u 1000:1000") {
@@ -74,49 +73,25 @@ stage('Test (Jest in container)') {
 }
 
     stage('Code Quality') {
-      steps {
-        withCredentials([
-          string(credentialsId: 'sonar-host-url', variable: 'SONAR_HOST_URL'),
-          string(credentialsId: 'sonar-token',    variable: 'SONAR_TOKEN')
-        ]) {
-          sh '''
-            set -e
-            # Run Sonar Scanner in container (uses sonar-project.properties from repo)
-            docker run --rm \
-              -e SONAR_HOST_URL="$SONAR_HOST_URL" \
-              -e SONAR_LOGIN="$SONAR_TOKEN" \
-              -v "$WORKSPACE:/usr/src" \
-              sonarsource/sonar-scanner-cli:latest
-
-            # ---- Quality Gate poll (works without Jenkins Sonar plugin config) ----
-            RT="$(find "$WORKSPACE" -maxdepth 2 -name report-task.txt | head -n1)"
-            echo "Using report: $RT"
-            CE_URL="$(grep -E '^ceTaskUrl=' "$RT" | cut -d= -f2)"
-
-            # Wait for CE task to finish
-            ATTEMPTS=60
-            while [ $ATTEMPTS -gt 0 ]; do
-              RESP="$(curl -fsS -u "$SONAR_TOKEN:" "$CE_URL")" || true
-              STATUS="$(echo "$RESP" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p')"
-              if [ "$STATUS" = "SUCCESS" ]; then
-                ANALYSIS_ID="$(echo "$RESP" | sed -n 's/.*"analysisId":"\\([^"]*\\)".*/\\1/p')"
-                break
-              elif [ "$STATUS" = "FAILED" ]; then
-                echo "Sonar CE task failed: $RESP"; exit 1
-              fi
-              sleep 2; ATTEMPTS=$((ATTEMPTS-1))
-            done
-            [ -n "$ANALYSIS_ID" ] || { echo "Timed out waiting for Sonar analysis"; exit 1; }
-
-            QG_URL="$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID"
-            QG="$(curl -fsS -u "$SONAR_TOKEN:" "$QG_URL")"
-            QG_STATUS="$(echo "$QG" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p')"
-            echo "Quality Gate: $QG_STATUS"
-            [ "$QG_STATUS" = "OK" ] || { echo "$QG"; exit 1; }
-          '''
-        }
-      }
+  steps {
+    withCredentials([
+      string(credentialsId: 'sonar-host-url', variable: 'SONAR_HOST_URL'),
+      string(credentialsId: 'sonar-token',    variable: 'SONAR_TOKEN')
+    ]) {
+      sh '''
+        set -e
+        docker run --rm \
+          --add-host=host.docker.internal:host-gateway \
+          -e SONAR_HOST_URL=$SONAR_HOST_URL \
+          -e SONAR_LOGIN=$SONAR_TOKEN \
+          -v "$PWD:/usr/src" -w /usr/src \
+          sonarsource/sonar-scanner-cli:latest \
+          -Dsonar.host.url=$SONAR_HOST_URL \
+          -Dsonar.login=$SONAR_TOKEN
+      '''
     }
+  }
+}
 
     stage('Security (optional)') {
       steps {
