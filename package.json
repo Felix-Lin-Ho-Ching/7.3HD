@@ -21,5 +21,8 @@
   "jest-junit": {
     "outputDirectory": "reports",
     "outputName": "junit.xml"
+  },
+  "overrides": {
+    "cross-spawn": "7.0.5"
   }
 }
